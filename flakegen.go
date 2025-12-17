@@ -65,15 +65,38 @@ func (n *Node) GetID() (int64, error) {
 	defer n.mu.Unlock()
 	timeNow := time.Now().UnixMilli()
 
+	if timeNow < n.nowUnixMilli {
+		return 0, errors.New("时钟回拨错误")
+	}
+
 	if timeNow == n.nowUnixMilli {
 		n.numID++
+		if n.numID > n.maxNumID {
+			// 如果当前毫秒内的序列号用完，则等待下一毫秒
+			for timeNow <= n.nowUnixMilli {
+				timeNow = time.Now().UnixMilli()
+			}
+			n.numID = 0
+		}
 	} else {
+		// 新的时间戳，重置序列号
 		n.numID = 0
 	}
-	if n.nodeID > n.maxNodeID {
+
+	// 更新当前时间戳
+	n.nowUnixMilli = timeNow
+
+	// 检查序列号是否越界（虽然上面的逻辑已确保不会越界，但保留检查）
+	if n.numID > n.maxNumID {
 		return 0, errors.New("序列ID越界")
 	}
 
-	id := (timeNow-n.startUnixMilli)<<int64(n.nodeBits)<<int64(n.serviceBits)<<int64(n.numIDBits) | int64(n.nodeBits)<<int64(n.serviceBits)<<int64(n.numIDBits) | int64(n.serviceID)<<int64(n.numIDBits) | n.nowUnixMilli
+	// 构造ID: 时间戳 + 机器ID + 业务ID + 序列号
+	// 时间戳在高位，序列号在低位
+	id := (timeNow-n.startUnixMilli)<<int64(n.nodeBits+n.serviceBits+n.numIDBits) |
+		int64(n.nodeID)<<int64(n.serviceBits+n.numIDBits) |
+		int64(n.serviceID)<<int64(n.numIDBits) |
+		int64(n.numID)
+
 	return id, nil
 }
